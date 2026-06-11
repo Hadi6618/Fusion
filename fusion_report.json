@@ -1,0 +1,159 @@
+{
+  "best": {
+    "beta_1_stgnf": 0.05,
+    "beta_2_mulde": 0.95,
+    "max_micro_auc": 0.8717301322314427,
+    "num_frames": 40791,
+    "num_videos": 107
+  },
+  "summary": {
+    "num_frames": 40791,
+    "num_videos": 107,
+    "beta_1_grid_size": 101,
+    "normalization": "global_minmax",
+    "smooth_sigma": 2.0,
+    "sigma_search": {
+      "0.0": {
+        "stgnf_auc": 0.834893,
+        "mulde_auc": 0.78981,
+        "avg_auc": 0.812351
+      },
+      "1.0": {
+        "stgnf_auc": 0.834911,
+        "mulde_auc": 0.795562,
+        "avg_auc": 0.815236
+      },
+      "2.0": {
+        "stgnf_auc": 0.834949,
+        "mulde_auc": 0.796849,
+        "avg_auc": 0.815899
+      },
+      "3.0": {
+        "stgnf_auc": 0.834979,
+        "mulde_auc": 0.796637,
+        "avg_auc": 0.815808
+      },
+      "4.0": {
+        "stgnf_auc": 0.834944,
+        "mulde_auc": 0.795917,
+        "avg_auc": 0.815431
+      },
+      "5.0": {
+        "stgnf_auc": 0.834801,
+        "mulde_auc": 0.794868,
+        "avg_auc": 0.814834
+      },
+      "6.0": {
+        "stgnf_auc": 0.834515,
+        "mulde_auc": 0.793509,
+        "avg_auc": 0.814012
+      },
+      "8.0": {
+        "stgnf_auc": 0.833364,
+        "mulde_auc": 0.790086,
+        "avg_auc": 0.811725
+      },
+      "10.0": {
+        "stgnf_auc": 0.831447,
+        "mulde_auc": 0.786037,
+        "avg_auc": 0.808742
+      }
+    }
+  },
+  "alignment_stats": {
+    "videos_in_stgnf": 107,
+    "videos_in_mulde": 107,
+    "videos_aligned": 107,
+    "videos_skipped_no_overlap": [],
+    "videos_skipped_no_labels": [],
+    "videos_skipped_constant": {
+      "stgnf": [],
+      "mulde": []
+    },
+    "stgnf_frame_offset": 0,
+    "stgnf_score_mode": "normality",
+    "auto_detect": {
+      "candidates": [
+        -2,
+        -1,
+        0,
+        1,
+        2
+      ],
+      "stgnf_micro_auc_per_candidate": {
+        "-2|anomaly": {
+          "videos_aligned": 107,
+          "frames_total": 40577,
+          "micro_auc_stgnf": 0.1674854399899877,
+          "stgnf_score_mode": "anomaly"
+        },
+        "-2|normality": {
+          "videos_aligned": 107,
+          "frames_total": 40577,
+          "micro_auc_stgnf": 0.8325145600100122,
+          "stgnf_score_mode": "normality"
+        },
+        "-1|anomaly": {
+          "videos_aligned": 107,
+          "frames_total": 40684,
+          "micro_auc_stgnf": 0.16614111503553708,
+          "stgnf_score_mode": "anomaly"
+        },
+        "-1|normality": {
+          "videos_aligned": 107,
+          "frames_total": 40684,
+          "micro_auc_stgnf": 0.8338588849644629,
+          "stgnf_score_mode": "normality"
+        },
+        "+0|anomaly": {
+          "videos_aligned": 107,
+          "frames_total": 40791,
+          "micro_auc_stgnf": 0.16510730453196948,
+          "stgnf_score_mode": "anomaly"
+        },
+        "+0|normality": {
+          "videos_aligned": 107,
+          "frames_total": 40791,
+          "micro_auc_stgnf": 0.8348926954680306,
+          "stgnf_score_mode": "normality"
+        },
+        "+1|anomaly": {
+          "videos_aligned": 107,
+          "frames_total": 40684,
+          "micro_auc_stgnf": 0.16472009715144345,
+          "stgnf_score_mode": "anomaly"
+        },
+        "+1|normality": {
+          "videos_aligned": 107,
+          "frames_total": 40684,
+          "micro_auc_stgnf": 0.8352799028485566,
+          "stgnf_score_mode": "normality"
+        },
+        "+2|anomaly": {
+          "videos_aligned": 107,
+          "frames_total": 40577,
+          "micro_auc_stgnf": 0.1646348315365634,
+          "stgnf_score_mode": "anomaly"
+        },
+        "+2|normality": {
+          "videos_aligned": 107,
+          "frames_total": 40577,
+          "micro_auc_stgnf": 0.8353651684634367,
+          "stgnf_score_mode": "normality"
+        }
+      },
+      "chosen_stgnf_micro_auc": 0.8348926954680306
+    }
+  },
+  "stgnf_meta": {
+    "micro_auc": 0.8349126927825363,
+    "num_videos": 107
+  },
+  "mulde_meta": {
+    "best_components": 5,
+    "best_micro_auc": 0.7966474256261625,
+    "smoothing": {
+      "smooth_sigma_frames": 3
+    }
+  }
+}
