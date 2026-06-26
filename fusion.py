@@ -68,6 +68,36 @@ def load_score_pickle(path: Path) -> Tuple[Dict[str, dict], dict]:
     with open(path, "rb") as f:
         pkl = pickle.load(f)
     scores, meta = _normalize_pkl_payload(pkl)
+    # Sanitize inf / NaN values that can arise when a normalizing-flow model
+    # encounters degenerate pose windows (e.g. all-zero keypoints from a failed
+    # detector).  We replace +inf with the per-video max finite score and -inf /
+    # NaN with the per-video min finite score so that the ranking signal is
+    # preserved and sklearn's roc_auc_score does not crash.
+    total_inf = 0
+    for vid, entry in scores.items():
+        raw = np.asarray(entry["anomaly_scores"], dtype=np.float64)
+        finite_mask = np.isfinite(raw)
+        n_bad = int((~finite_mask).sum())
+        if n_bad == 0:
+            continue
+        total_inf += n_bad
+        if finite_mask.any():
+            vmax = float(raw[finite_mask].max())
+            vmin = float(raw[finite_mask].min())
+        else:
+            vmax = 0.0
+            vmin = 0.0
+        raw = np.where(raw == np.inf,  vmax, raw)
+        raw = np.where(~np.isfinite(raw), vmin, raw)
+        entry["anomaly_scores"] = raw.astype(np.float32)
+    if total_inf:
+        import warnings
+        warnings.warn(
+            f"load_score_pickle: replaced {total_inf} non-finite scores "
+            f"in '{Path(path).name}' with per-video boundary values.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
     return scores, meta
 
 
