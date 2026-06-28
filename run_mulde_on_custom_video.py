@@ -4,7 +4,7 @@ Run MULDE Anomaly Detection on a Custom MP4 Video
 -------------------------------------------------
 This script runs the entire MULDE inference pipeline on a single custom .mp4 video file:
 1. Loads the pretrained Hiera-L model from PyTorch Hub (head set to Identity).
-2. Decodes and preprocesses the video frames.
+2. Decodes and preprocesses the video frames (falls back to OpenCV if decord fails).
 3. Extracts spatiotemporal features (1152-dim) in batches.
 4. Standardizes features using training stats (mean/std).
 5. Computes the 16-dimensional multiscale log-density signature using the trained MLP.
@@ -12,15 +12,6 @@ This script runs the entire MULDE inference pipeline on a single custom .mp4 vid
 7. Applies temporal Gaussian smoothing (sigma=15.0).
 8. Generates a professional line chart of the log-likelihood scores (with optional shaded anomaly zones)
    and saves a CSV of the frame-level scores.
-
-Usage:
-  python run_mulde_on_custom_video.py \
-    --video path/to/video.mp4 \
-    --checkpoint path/to/mulde_final.pt \
-    --stats path/to/train_feature_stats.npz \
-    --gmm path/to/gmm_components_5.joblib \
-    --output_dir output_results \
-    --shading "50-200,340-440"
 """
 
 import os
@@ -34,39 +25,16 @@ import numpy as np
 import pandas as pd
 import torch
 import cv2
-from pathlib import Path
 import matplotlib.pyplot as plt
 import joblib
-import subprocess
 from decord import VideoReader, cpu
 from scipy.ndimage import gaussian_filter1d
 
 # Inject official MULDE repo path if available to import architectures
-OFFICIAL_REPO_URL = "https://github.com/jakubmicorek/MULDE-Multiscale-Log-Density-Estimation-via-Denoising-Score-Matching-for-Video-Anomaly-Detection.git"
-OFFICIAL_REPO_DIR = Path("/content/MULDE_official")
-# Optional reproducibility pin. Leave as None to use the repository default branch.
-OFFICIAL_REPO_COMMIT = None
-
-if not OFFICIAL_REPO_DIR.exists():
-    subprocess.run(["git", "clone", OFFICIAL_REPO_URL, str(OFFICIAL_REPO_DIR)], check=True)
-else:
-    print(f"Repository already exists: {OFFICIAL_REPO_DIR}")
-
-if OFFICIAL_REPO_COMMIT is not None:
-    subprocess.run(["git", "-C", str(OFFICIAL_REPO_DIR), "checkout", OFFICIAL_REPO_COMMIT], check=True)
-
-repo_sha = subprocess.check_output(
-    ["git", "-C", str(OFFICIAL_REPO_DIR), "rev-parse", "HEAD"],
-    text=True,
-).strip()
-
-sys.path.insert(0, str(OFFICIAL_REPO_DIR))
+OFFICIAL_REPO_PATH = "C:/Projects/Graduate Project/MULDE-Multiscale-Log-Density-Estimation-via-Denoising-Score-Matching-for-Video-Anomaly-Detection-master"
+if os.path.exists(OFFICIAL_REPO_PATH):
+    sys.path.insert(0, OFFICIAL_REPO_PATH)
 from models import MLPs, ScoreOrLogDensityNetwork
-
-print(f"Imported official MULDE models from: {OFFICIAL_REPO_DIR}")
-print(f"Official repo commit: {repo_sha}")
-
-
 
 
 def load_hiera_extractor(device):
@@ -83,8 +51,8 @@ def load_hiera_extractor(device):
     return model
 
 
-def preprocess_all_frames(vr, num_frames, target_size=(224, 224), chunk_size=128):
-    """Decode and normalize all video frames exactly once."""
+def preprocess_all_frames_decord(vr, num_frames, target_size=(224, 224), chunk_size=128):
+    """Decode and normalize all video frames exactly once using decord."""
     mean = np.array([0.45, 0.45, 0.45], dtype=np.float32).reshape(1, 3, 1, 1)
     std  = np.array([0.225, 0.225, 0.225], dtype=np.float32).reshape(1, 3, 1, 1)
     all_frames = np.empty((num_frames, 3, target_size[0], target_size[1]), dtype=np.float32)
@@ -103,6 +71,34 @@ def preprocess_all_frames(vr, num_frames, target_size=(224, 224), chunk_size=128
     return all_frames
 
 
+def preprocess_all_frames_opencv(video_path, num_frames, target_size=(224, 224)):
+    """Decode and normalize all video frames exactly once using OpenCV."""
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"OpenCV failed to open video: {video_path}")
+
+    mean = np.array([0.45, 0.45, 0.45], dtype=np.float32).reshape(1, 3, 1, 1)
+    std  = np.array([0.225, 0.225, 0.225], dtype=np.float32).reshape(1, 3, 1, 1)
+    all_frames = np.empty((num_frames, 3, target_size[0], target_size[1]), dtype=np.float32)
+
+    for idx in range(num_frames):
+        ret, frame = cap.read()
+        if not ret:
+            print(f"[WARNING] OpenCV read failed at frame {idx}. Truncating video to {idx} frames.")
+            all_frames = all_frames[:idx]
+            num_frames = idx
+            break
+        # Convert BGR to RGB
+        img_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        img_resized = cv2.resize(img_rgb, target_size, interpolation=cv2.INTER_LINEAR)
+        img_float = img_resized.astype(np.float32) / 255.0
+        all_frames[idx] = img_float.transpose(2, 0, 1)  # HWC -> CHW
+
+    cap.release()
+    all_frames = (all_frames - mean) / std
+    return all_frames, num_frames
+
+
 def generate_clip_indices(i, num_frames):
     """Sample 16 frames with stride 4, centered around target frame i."""
     indices = []
@@ -116,13 +112,32 @@ def generate_clip_indices(i, num_frames):
 def extract_hiera_features(video_path, model, device, batch_size=8):
     """Run Hiera-L batched inference to extract 1152-dim features."""
     print(f"Decoding video: {video_path}...")
-    vr = VideoReader(video_path, ctx=cpu(0))
-    num_frames = len(vr)
-    fps = vr.get_avg_fps()
+    
+    use_decord = True
+    try:
+        vr = VideoReader(video_path, ctx=cpu(0))
+        num_frames = len(vr)
+        fps = vr.get_avg_fps()
+    except Exception as e:
+        print(f"[WARNING] decord failed to open video: {e}. Falling back to OpenCV...")
+        use_decord = False
 
-    print(f"Pre-caching {num_frames} frames...")
-    cached_frames = preprocess_all_frames(vr, num_frames)
-    del vr
+    if use_decord:
+        print(f"Pre-caching {num_frames} frames (using decord)...")
+        cached_frames = preprocess_all_frames_decord(vr, num_frames)
+        del vr
+    else:
+        # Fallback to OpenCV
+        cap_temp = cv2.VideoCapture(video_path)
+        if not cap_temp.isOpened():
+            raise RuntimeError(f"OpenCV also failed to read video: {video_path}")
+        num_frames = int(cap_temp.get(cv2.CAP_PROP_FRAME_COUNT))
+        fps = cap_temp.get(cv2.CAP_PROP_FPS)
+        cap_temp.release()
+        
+        print(f"Pre-caching {num_frames} frames (using OpenCV)...")
+        cached_frames, num_frames = preprocess_all_frames_opencv(video_path, num_frames)
+        
     gc.collect()
 
     print("Running Hiera-L batched feature extraction...")
