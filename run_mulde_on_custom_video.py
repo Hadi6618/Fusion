@@ -10,25 +10,30 @@ This script runs the entire MULDE inference pipeline on a single custom .mp4 vid
 5. Computes the 16-dimensional multiscale log-density signature using the trained MLP.
 6. Scores the signatures using the GMM to compute raw log-likelihood scores.
 7. Applies temporal Gaussian smoothing (sigma=15.0).
-8. Generates a professional line chart of the log-likelihood scores (with optional shaded anomaly zones)
-   and saves a CSV of the frame-level scores.
+8. Classifies frames as normal/anomaly via an adaptive threshold on smoothed scores.
+9. Detects anomaly time segments (frame → seconds using the video FPS).
+10. Saves a multi-panel dashboard, per-frame CSV, interval table, and JSON summary.
 """
 
 import os
 import sys
 import gc
 import argparse
-import json
-import time
-import math
 import numpy as np
-import pandas as pd
+from pathlib import Path
 import torch
 import cv2
-import matplotlib.pyplot as plt
 import joblib
 from decord import VideoReader, cpu
 from scipy.ndimage import gaussian_filter1d
+
+from mulde_visualization import (
+    build_results_dataframe,
+    generate_anomaly_dashboard,
+    parse_frame_ranges,
+    print_anomaly_report,
+    save_anomaly_artifacts,
+)
 
 # Inject official MULDE repo path if available to import architectures
 OFFICIAL_REPO_PATH = "C:/Projects/Graduate Project/MULDE-Multiscale-Log-Density-Estimation-via-Denoising-Score-Matching-for-Video-Anomaly-Detection-master"
@@ -194,7 +199,49 @@ def main():
     parser.add_argument("--gmm", type=str, required=True, help="Path to trained GMM model (.joblib)")
     parser.add_argument("--output_dir", type=str, default="output_results", help="Directory to save output files")
     parser.add_argument("--smooth_sigma", type=float, default=15.0, help="Sigma for temporal Gaussian smoothing")
-    parser.add_argument("--shading", type=str, default=None, help="Shaded frame ranges for plotting (e.g. '50-200,340-440')")
+    parser.add_argument(
+        "--shading",
+        type=str,
+        default=None,
+        help="Optional known-anomaly frame ranges to highlight in yellow (e.g. '50-200,340-440')",
+    )
+    parser.add_argument(
+        "--threshold_method",
+        type=str,
+        default="mad",
+        choices=["mad", "percentile", "manual"],
+        help="How to set the anomaly threshold on smoothed scores (higher = more anomalous)",
+    )
+    parser.add_argument(
+        "--threshold_percentile",
+        type=float,
+        default=90.0,
+        help="Percentile for threshold_method=percentile (frames above this score are anomalous)",
+    )
+    parser.add_argument(
+        "--threshold_mad_k",
+        type=float,
+        default=3.0,
+        help="MAD multiplier for threshold_method=mad",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=None,
+        help="Fixed anomaly score threshold when threshold_method=manual",
+    )
+    parser.add_argument(
+        "--min_segment_sec",
+        type=float,
+        default=0.4,
+        help="Minimum contiguous anomaly duration to report as a segment",
+    )
+    parser.add_argument(
+        "--merge_gap_sec",
+        type=float,
+        default=0.25,
+        help="Merge anomaly segments separated by gaps shorter than this (seconds)",
+    )
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -256,58 +303,57 @@ def main():
     print(f"Loading GMM model from: {args.gmm}")
     gmm = joblib.load(args.gmm)
     
-    # Compute raw log-likelihood under GMM (scores matching the user chart shape)
     raw_log_likelihood = gmm.score_samples(signatures)
-    
-    # Apply 1D Gaussian smoothing
     smoothed_log_likelihood = gaussian_filter1d(raw_log_likelihood, sigma=args.smooth_sigma)
 
-    # 5. Export scores to CSV
+    if fps <= 0:
+        print("[WARNING] Invalid FPS reported by decoder; defaulting to 25.0 FPS for timestamps.")
+        fps = 25.0
+
     video_name = os.path.splitext(os.path.basename(args.video))[0]
-    csv_path = os.path.join(args.output_dir, f"{video_name}_mulde_scores.csv")
-    df_out = pd.DataFrame({
-        "frame_index": np.arange(num_frames),
-        "raw_log_likelihood": raw_log_likelihood,
-        "smoothed_log_likelihood": smoothed_log_likelihood
-    })
-    df_out.to_csv(csv_path, index=False)
-    print(f"✓ Saved frame scores to CSV: {csv_path}")
+    manual_ranges = parse_frame_ranges(args.shading)
 
-    # 6. Plot log-likelihood chart (matching user reference)
-    plt.figure(figsize=(12, 4))
-    
-    # Plot raw scores (light purple/blue)
-    plt.plot(raw_log_likelihood, color="#b3b3f2", alpha=0.7, linewidth=1.0, label="Raw Scores")
-    # Plot smoothed scores (green)
-    plt.plot(smoothed_log_likelihood, color="#008000", linewidth=1.8, label="Smoothed Scores")
+    df_out, threshold, segments = build_results_dataframe(
+        raw_log_likelihood,
+        smoothed_log_likelihood,
+        fps,
+        threshold_method=args.threshold_method,
+        threshold_percentile=args.threshold_percentile,
+        threshold_mad_k=args.threshold_mad_k,
+        manual_threshold=args.threshold,
+        min_segment_sec=args.min_segment_sec,
+        merge_gap_sec=args.merge_gap_sec,
+    )
 
-    # Handle shading/anomaly boundaries
-    if args.shading:
-        try:
-            ranges = args.shading.split(",")
-            for r in ranges:
-                start_r, end_r = map(int, r.split("-"))
-                plt.axvspan(start_r, end_r, color="#ffb3b3", alpha=0.6, label="Anomaly Window" if "Anomaly Window" not in plt.gca().get_legend_handles_labels()[1] else "")
-        except Exception as e:
-            print(f"[WARNING] Failed to parse shading ranges: {e}. Format should be: '50-200,340-440'")
+    dashboard_path = os.path.join(args.output_dir, f"{video_name}_anomaly_dashboard.png")
+    generate_anomaly_dashboard(
+        df_out,
+        segments,
+        video_name=video_name,
+        fps=fps,
+        threshold=threshold,
+        output_path=dashboard_path,
+        manual_frame_ranges=manual_ranges or None,
+        threshold_method=args.threshold_method,
+    )
 
-    plt.xlabel("Frame", fontsize=11, labelpad=8)
-    plt.ylabel("Log-Likelihood Score", fontsize=11, labelpad=8)
-    plt.title(f"MULDE Anomaly Score Profile — {video_name}", fontsize=12, fontweight="bold", pad=12)
-    plt.xlim(0, num_frames)
-    
-    # Invert y-axis limits dynamically based on values, but keep standard log-density limits
-    margin = (raw_log_likelihood.max() - raw_log_likelihood.min()) * 0.05
-    plt.ylim(raw_log_likelihood.min() - margin, raw_log_likelihood.max() + margin)
+    artifact_paths = save_anomaly_artifacts(
+        df_out,
+        segments,
+        output_dir=args.output_dir,
+        video_name=video_name,
+        fps=fps,
+        threshold=threshold,
+        threshold_method=args.threshold_method,
+        smooth_sigma=args.smooth_sigma,
+        dashboard_path=Path(dashboard_path),
+    )
 
-    plt.grid(True, linestyle="--", alpha=0.3)
-    plt.legend(loc="lower right")
-    plt.tight_layout()
-
-    chart_path = os.path.join(args.output_dir, f"{video_name}_anomaly_profile.png")
-    plt.savefig(chart_path, dpi=300)
-    plt.close()
-    print(f"✓ Saved anomaly visualization chart: {chart_path}")
+    print_anomaly_report(segments, fps, threshold, args.threshold_method)
+    print(f"\n✓ Saved frame scores CSV:      {artifact_paths['scores_csv']}")
+    print(f"✓ Saved anomaly intervals CSV: {artifact_paths['intervals_csv']}")
+    print(f"✓ Saved summary JSON:          {artifact_paths['summary_json']}")
+    print(f"✓ Saved anomaly dashboard:     {artifact_paths['dashboard_png']}")
     print("Inference completed successfully!")
 
 
