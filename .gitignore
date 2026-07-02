@@ -1,0 +1,2 @@
+# Ignore node modules (heavy dependency folder)
+__pycache__/
