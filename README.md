@@ -2,8 +2,6 @@
 
 Fusion is a research workspace for video anomaly detection. It contains the code, notebooks, and helpers used to extract video features, train and run MULDE-based scoring, and generate visual reports for anomaly analysis.
 
-This README focuses only on the files in the repository root. Subfolders such as `Others/` and `__pycache__/` are intentionally left out.
-
 ## Project Overview
 
 The repository is organized around a simple pipeline:
@@ -15,6 +13,24 @@ The repository is organized around a simple pipeline:
 5. Save plots, tables, and summaries for review.
 
 The notebooks in the root folder are the main experiment entry points, while the Python files provide reusable model and inference logic.
+
+## Source Tree
+
+```text
+Fusion/
+├── Avenue_Hiera_L_Feature_Extraction.ipynb
+├── DA_STG_NF_Pose_Extraction_and_Testing.ipynb
+├── fusion.py
+├── models.py
+├── MULDE_Training_GMM.ipynb
+├── mulde_visualization.py
+├── Pose Extraction and Testing.ipynb
+├── README.md
+├── run_custom_anomaly_detection.ipynb
+├── run_mulde_on_custom_video.py
+├── ShanghaiTech_Ensemble_Fusion.ipynb
+└── ShanghaiTech_Hiera_L_Feature_Extraction.ipynb
+```
 
 ## Root Files
 
@@ -99,5 +115,5 @@ Use the notebooks when you want to run or reproduce an experiment. Use the Pytho
 ## Notes
 
 - Only top-level files are documented here.
-- The README is meant to be a clean starting point, not a full source tree dump.
+- The tree above is the source tree dump for the repository root.
 - If you add or rename root files, update this document so it stays accurate.
